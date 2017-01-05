@@ -1,9 +1,14 @@
+#define _BSB_SOURCE
+
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
+#include <sys/time.h>
 #include "chip8.h"
-#include <time.h>
+
+int debug_enabled = 0; // debug mode flag
 
 
 /*
@@ -426,17 +431,36 @@ int main(int argc, char *argv[]){
   unsigned int hex1, hex2 = 0;
   uint8_t half_opcode;
   int start = 0x0200;
+  char opt;
+  int program_arg = 1;
 
-  // TODO: add debug option
+  // process flags
+  opterr = 0;
+  while ((opt = getopt(argc, argv, "dh")) != -1){
+    program_arg++;
+    switch (opt){
+      case 'd': // debug
+        debug_enabled = 1;
+        break;
+      case 'h': // help
+        printf("USAGE: %s <program_name>\n", argv[0]);
+        printf("OPTIONS: -dh\n");
+        printf("\t-d: debug mode\n");
+        printf("\t-h: help\n");
+        return 0;
+      default:
+        break;
+    }
+  }
 
-  if (argc != 2){ // no program given
+  if (argc < 2){ // no program given
     printf("USAGE: %s <program_name>\n", argv[0]);
     return 0;  
   }
 
   coldBoot(&cpu1); // setup chip8
 
-  program = fopen(argv[1], "r");
+  program = fopen(argv[program_arg], "r");
   if (program == NULL){
     fclose(program);
     printf("ERROR: program failed to open\n");
@@ -489,6 +513,13 @@ int main(int argc, char *argv[]){
 
     //updateKeys(&cpu1);
     updateTimers(&cpu1); // TODO: limit to 60 instructions per sec
+
+    if (debug_enabled){
+      printf("Opcode: %04X\n", cpu1.opcode);
+      dumpDebug(&cpu1);
+      printf("Press any key to continue");
+      getchar();
+    }
   }
 
   return 0;

@@ -1,6 +1,7 @@
 # CHIP-8-Emulator
 
 USAGE: %s <program_name>\n", argv[0]
+
 OPTIONS: -dh
   -d: debug mode
   -h: help

@@ -1,6 +1,10 @@
 # CHIP-8-Emulator
 
-USAGE: %s \<program_name>\n", argv[0] <br/>
+Make options:
+&nbsp;&nbsp;all
+&nbsp;&nbsp;clean
+
+USAGE: ./chip8 \<program_name> <br/>
 OPTIONS: -dh <br/>
 &nbsp;&nbsp;-d: debug mode <br/>
 &nbsp;&nbsp;-h: help <br/>

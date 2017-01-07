@@ -425,7 +425,6 @@ unsigned int asciiToHex(unsigned int ascii){
 
 
 int main(int argc, char *argv[]){
-  struct timeval clock_time;
   struct chip8 cpu1;
   FILE *program;
   unsigned int hex1, hex2 = 0;

@@ -6,9 +6,19 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/time.h>
+#include <GLUT/glut.h>
 #include "chip8.h"
 
+#define SCREEN_WIDTH 64
+#define SCREEN_HEIGHT 32
+#define DRAWWITHTEXTURE
+#define MODIFIER 5
+
 int debug_enabled = 0; // debug mode flag
+int display_width = SCREEN_WIDTH * MODIFIER;
+int display_height = SCREEN_HEIGHT * MODIFIER;
+uint8_t screenData[SCREEN_HEIGHT][SCREEN_WIDTH][3]; 
+struct chip8 *c8;
 
 
 /*
@@ -23,38 +33,205 @@ void dumpDebug(struct chip8 *cpu){
 
 
 /*
- * records key press or release
+ * Updates timers (delay and sound)
+ * Chip8 run at 60Hz
  */
-void updateKeys(struct chip8 *cpu){
-  int key;
-  key = getchar();
-  if (key <= 15 && key >= 0){
-    if (cpu->key[key]) // if key is not pressed
-      cpu->key[key] = 0;
-    else // if key is not pressed
-      cpu->key[key] = 1;
+void updateTimers(struct chip8 *cpu){
+  struct timeval current_time;
+  int usec_to_sleep;
+
+  // update delay timer
+  if (cpu->delay_timer > 0){
+    if (cpu->delay_timer == 1){
+      gettimeofday(&current_time, NULL); // determine time to sleep
+      usec_to_sleep = current_time.tv_usec - cpu->clock_time.tv_usec;
+      if (usec_to_sleep > 0)
+        usleep(usec_to_sleep);
+      gettimeofday(&cpu->clock_time, NULL); // reset clock time
+    }
+    cpu->delay_timer--;
+    if (cpu->delay_timer == 0)
+      cpu->delay_timer = 60;
   }
+
+  // update sound timer
+  if (cpu->sound_timer > 0){
+    if (cpu->sound_timer == 1)
+      printf("BEEP!\n");
+    cpu->sound_timer--;
+    if (cpu->sound_timer == 0)
+      cpu->sound_timer = 60;
+  } 
 }
 
 
 /*
- * updates graphics
+ * Keyboard down callback for GL
  */
-void updateGraphics(struct chip8 *cpu){
-  // loop each row
-  for (int height = 0; height < 32; height++){
-    for (int width = 0; width < 64; width++){
-      if (cpu->graphics[width + (height * 64)] == 1)
-        printf("*");
-      else
-        printf(" ");
-    }
-    printf("\n");
-  }
-  printf("=================================\n");
+void keyboardDown(unsigned char key, int x, int y){
+  if(key == 27)    // esc
+    exit(0);
 
-  // reset flag
-  cpu->draw_flag = FALSE;
+  if(key == '1')      c8->key[0x1] = 1;
+  else if(key == '2') c8->key[0x2] = 1;
+  else if(key == '3') c8->key[0x3] = 1;
+  else if(key == '4') c8->key[0xC] = 1;
+
+  else if(key == 'q') c8->key[0x4] = 1;
+  else if(key == 'w') c8->key[0x5] = 1;
+  else if(key == 'e') c8->key[0x6] = 1;
+  else if(key == 'r') c8->key[0xD] = 1;
+
+  else if(key == 'a') c8->key[0x7] = 1;
+  else if(key == 's') c8->key[0x8] = 1;
+  else if(key == 'd') c8->key[0x9] = 1;
+  else if(key == 'f') c8->key[0xE] = 1;
+
+  else if(key == 'z') c8->key[0xA] = 1;
+  else if(key == 'x') c8->key[0x0] = 1;
+  else if(key == 'c') c8->key[0xB] = 1;
+  else if(key == 'v') c8->key[0xF] = 1;
+}
+
+
+/*
+ * Keyboard up callback for GL
+ */
+void keyboardUp(unsigned char key, int x, int y){
+  if(key == '1')      c8->key[0x1] = 0;
+  else if(key == '2') c8->key[0x2] = 0;
+  else if(key == '3') c8->key[0x3] = 0;
+  else if(key == '4') c8->key[0xC] = 0;
+
+  else if(key == 'q') c8->key[0x4] = 0;
+  else if(key == 'w') c8->key[0x5] = 0;
+  else if(key == 'e') c8->key[0x6] = 0;
+  else if(key == 'r') c8->key[0xD] = 0;
+
+  else if(key == 'a') c8->key[0x7] = 0;
+  else if(key == 's') c8->key[0x8] = 0;
+  else if(key == 'd') c8->key[0x9] = 0;
+  else if(key == 'f') c8->key[0xE] = 0;
+
+  else if(key == 'z') c8->key[0xA] = 0;
+  else if(key == 'x') c8->key[0x0] = 0;
+  else if(key == 'c') c8->key[0xB] = 0;
+  else if(key == 'v') c8->key[0xF] = 0;
+}
+
+
+/*
+ * converts ASCII to hex for use in reading program
+ */
+unsigned int asciiToHex(unsigned int ascii){
+  if (ascii >= 48 && ascii <= 57) // 0-9
+    return ascii - 48;
+  else if (ascii >= 65 && ascii <= 70) // A-F
+    return ascii - 65 + 10;
+  else {
+    return 16;
+  }
+}
+
+/*
+ * Setup Texture
+ */
+void setupTexture(){
+  int x, y;
+
+  // Clear screen
+  for(y = 0; y < SCREEN_HEIGHT; ++y)    
+    for(x = 0; x < SCREEN_WIDTH; ++x)
+      screenData[y][x][0] = screenData[y][x][1] = screenData[y][x][2] = 0;
+
+  // Create a texture 
+  // Level = none; border = none; format = RGB;
+  glTexImage2D(GL_TEXTURE_2D, 0, 3, SCREEN_WIDTH, SCREEN_HEIGHT, 0, GL_RGB, GL_UNSIGNED_BYTE, (GLvoid*)screenData);
+
+  // Set up the texture
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP); 
+
+  // Enable textures
+  glEnable(GL_TEXTURE_2D);
+}
+
+
+/* 
+ * Draw on texture
+ */
+void updateTexture(struct chip8 *cpu){ 
+  int x, y;
+
+  // Update pixels
+  for(y = 0; y < 32; ++y)   
+    for(x = 0; x < 64; ++x)
+      if(cpu->graphics[(y * 64) + x] == 0)
+        screenData[y][x][0] = screenData[y][x][1] = screenData[y][x][2] = 0;  // Disabled
+      else 
+        screenData[y][x][0] = screenData[y][x][1] = screenData[y][x][2] = 255;  // Enabled
+    
+  // Update Texture
+  glTexSubImage2D(GL_TEXTURE_2D, 0 ,0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, GL_RGB, GL_UNSIGNED_BYTE, (GLvoid*)screenData);
+
+  glBegin( GL_QUADS );
+    glTexCoord2d(0.0, 0.0);   glVertex2d(0.0, 0.0);
+    glTexCoord2d(1.0, 0.0);   glVertex2d(display_width, 0.0);
+    glTexCoord2d(1.0, 1.0);   glVertex2d(display_width, display_height);
+    glTexCoord2d(0.0, 1.0);   glVertex2d(0.0, display_height);
+  glEnd();
+}
+
+/*
+ * Non-texture legacy routine
+ * Draw vertices
+ */
+void drawPixel(int x, int y){
+  glBegin(GL_QUADS);
+    glVertex3f((x * MODIFIER) + 0.0f,     (y * MODIFIER) + 0.0f,   0.0f);
+    glVertex3f((x * MODIFIER) + 0.0f,     (y * MODIFIER) + MODIFIER, 0.0f);
+    glVertex3f((x * MODIFIER) + MODIFIER, (y * MODIFIER) + MODIFIER, 0.0f);
+    glVertex3f((x * MODIFIER) + MODIFIER, (y * MODIFIER) + 0.0f,   0.0f);
+  glEnd();
+}
+
+
+/*
+ * Non-texture legacy routine
+ * Draws sprites
+ */
+void updateQuads(struct chip8 *cpu){
+  int x, y;
+  // Draw
+  for(y = 0; y < 32; ++y)   
+    for(x = 0; x < 64; ++x)
+    {
+      if(cpu->graphics[(y*64) + x] == 0) 
+        glColor3f(0.0f,0.0f,0.0f); // draw white
+      else 
+        glColor3f(1.0f,1.0f,1.0f); // draw black
+
+      drawPixel(x, y);
+    }
+}
+
+
+/*
+ * resize window
+ */ 
+void reshape_window(GLsizei w, GLsizei h){
+  glClearColor(0.0f, 0.0f, 0.5f, 0.0f);
+  glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    gluOrtho2D(0, w, h, 0);        
+    glMatrixMode(GL_MODELVIEW);
+    glViewport(0, 0, w, h);
+
+  // Resize quad
+  display_width = w;
+  display_height = h;
 }
 
 
@@ -62,22 +239,45 @@ void updateGraphics(struct chip8 *cpu){
  * handles one instruction cycle
  */
 void emulateCycle(struct chip8 *cpu){
-  int key, temp_index;
-  uint8_t temp_val, temp_register, x, y, n, pixel;
-  uint16_t temp_val_16;
+  int key;
+  int dont_increment = 0;
+  uint8_t temp_register, x, y, n, pixel;
   uint16_t opcode = (cpu->memory[cpu->program_counter] << 8 | 
     cpu->memory[cpu->program_counter + 1]); // fetch opcode
   cpu->opcode = opcode;
 
   switch (opcode & 0xF000){ // Decode opcode
     // Execute opcode
+    case 0x0000:
+      switch(opcode & 0x000F){
+        case  0x0000: // 0x00E0: clear screen
+          if (opcode != 0x00E0){
+            printf("Opcode not recognized: %04X\n", opcode);
+            dumpDebug(cpu);
+            exit(0);
+          }
+          memset(&cpu->graphics, 0, 64 * 32);
+          cpu->draw_flag = TRUE;
+          break;
+        case 0x000E: // 0x00EE: returns from subroutine
+          cpu->program_counter = cpu->stack[cpu->stack_pointer];
+          cpu->stack_pointer--;
+          break;
+        default:
+          printf("Opcode not recognized: %04X\n", opcode);
+          dumpDebug(cpu);
+          exit(0);
+      }
+      break;
     case 0x1000: // 1NNN: jumps to address NNN
-      cpu->program_counter = (opcode & 0x0FFF) - 2;
+      cpu->program_counter = (opcode & 0x0FFF);
+      dont_increment = 1;
       break;
     case 0x2000: // 2NNN: calls subroutine at address NNN
       cpu->stack[cpu->stack_pointer] = cpu->program_counter;
       cpu->stack_pointer++;
-      cpu->program_counter = (opcode & 0x0FFF) - 2;
+      cpu->program_counter = (opcode & 0x0FFF);
+      dont_increment = 1;
       break;
     case 0x3000: // 3XNN: skips next instruction if VX == NN
       if (cpu->registers[(opcode & 0x0F00) >> 8] == (opcode & 0x00FF))
@@ -164,7 +364,8 @@ void emulateCycle(struct chip8 *cpu){
       cpu->index = opcode & 0x0FFF;
       break;
     case 0xB000: // BNNN: jumps to address NNN plus V0
-      cpu->program_counter = (opcode & 0x0FFF) + cpu->registers[0] - 2;
+      cpu->program_counter = (opcode & 0x0FFF) + cpu->registers[0];
+      dont_increment = 1;
       break;
     case 0xC000: // CXNN: VX = rand() & NN
       cpu->registers[(opcode & 0x0F00) >> 8] = rand() & (opcode & 0x00FF);
@@ -212,12 +413,14 @@ void emulateCycle(struct chip8 *cpu){
           cpu->registers[(opcode & 0x0F00) >> 8] = cpu->delay_timer;
           break;
         case 0x000A: // FX0A: Wait for key, then store in VX
+          // TODO:
           while(1){
             printf("waiting for key press (0-15)...");
             key = getchar();
             if (key <= 15 && key >= 0){
               cpu->key[key] = 1;
               cpu->registers[(opcode & 0x0F00) >> 8] = key;
+              printf("\n");
               break;
             }
           }
@@ -246,54 +449,17 @@ void emulateCycle(struct chip8 *cpu){
           cpu->memory[cpu->index + 2] = (cpu->registers[(opcode & 0x0F00) >> 8] % 100) % 10;
           break;
         case 0x0055: // FX55: stores V0 to VX (including VX) in memory starting at address in index register
-          temp_index = cpu->index;
-          temp_val = 0;
-          for (int i = 0; i <= ((opcode & 0x0F00) >> 8); i++){
-            // first 8 bits
-            temp_val = cpu->registers[i] >> 8;
-            cpu->memory[temp_index] = temp_val;
-            temp_index++;
-            // second 8 bits
-            temp_val = cpu->registers[i];
-            cpu->memory[temp_index] = temp_val;
-            temp_index++;
-          }
+          // TODO: does index get incremented
+          for (int i = 0; i <= ((opcode & 0x0F00) >> 8); i++)
+            cpu->memory[cpu->index + i] = cpu->registers[i];
+          cpu->index += ((opcode & 0x0F00) >> 8) + 1;
           break;
         case 0x0065: // FX65: fills V0 to VX (including VX) with values from memory starting at 
                      // address in index register
-          temp_index = cpu->index;
-          temp_val_16 = 0;
-          for (int i = 0; i <= ((opcode & 0x0F00) >> 8); i++){
-            // first 8 bits
-            temp_val_16 = cpu->memory[temp_index] << 8;
-            temp_index++;
-            // second 8 bits
-            temp_val_16 += cpu->memory[temp_index];
-            temp_index++;
-            cpu->registers[i] = temp_val_16;
-          }
+          for (int i = 0; i <= ((opcode & 0x0F00) >> 8); i++)
+            cpu->registers[i] = cpu->memory[cpu->index + i];
+          cpu->index += ((opcode & 0x0F00) >> 8) + 1;
           break; 
-        default:
-          printf("Opcode not recognized: %04X\n", opcode);
-          dumpDebug(cpu);
-          exit(0);
-      }
-      break;
-    case 0x0000:
-      switch(opcode & 0x000F){
-        case  0x0000: // 0x00E0: clear screen
-          if (opcode != 0x00E0){
-            printf("Opcode not recognized: %04X\n", opcode);
-            dumpDebug(cpu);
-            exit(0);
-          }
-          memset(&cpu->graphics, 0, 64 * 32);
-          cpu->draw_flag = TRUE;
-          break;
-        case 0x000E: // 0x00EE: returns from subroutine
-          cpu->program_counter = cpu->stack[cpu->stack_pointer];
-          cpu->stack_pointer--;
-          break;
         default:
           printf("Opcode not recognized: %04X\n", opcode);
           dumpDebug(cpu);
@@ -305,7 +471,17 @@ void emulateCycle(struct chip8 *cpu){
       dumpDebug(cpu);
       exit(0);
   }
-  cpu->program_counter += 2;
+
+  if (debug_enabled){
+    printf("Opcode: %04X\n", cpu->opcode);
+    dumpDebug(cpu);
+    printf("Press any key to continue");
+    getchar();
+  }
+
+  if (!dont_increment)
+    cpu->program_counter += 2;
+  updateTimers(cpu);
 }
 
 
@@ -343,39 +519,30 @@ void coldBoot(struct chip8 *cpu){
 
   // set start time
   gettimeofday(&cpu->clock_time, NULL);
+
+  c8 = cpu;
 }
 
 
-/*
- * Updates timers (delay and sound)
- * Chip8 run at 60Hz
- */
-void updateTimers(struct chip8 *cpu){
-  struct timeval current_time;
-  int usec_to_sleep;
+void display(){
+  emulateCycle(c8);
+  
+  if(c8->draw_flag){
+    // Clear framebuffer
+    glClear(GL_COLOR_BUFFER_BIT);
+        
+#ifdef DRAWWITHTEXTURE
+    updateTexture(c8);
+#else
+    updateQuads(c8);   
+#endif      
 
-  // update delay timer
-  if (cpu->delay_timer > 0){
-    if (cpu->delay_timer == 1){
-      gettimeofday(&current_time, NULL); // determine time to sleep
-      usec_to_sleep = current_time.tv_usec - cpu->clock_time.tv_usec;
-      if (usec_to_sleep > 0)
-        usleep(usec_to_sleep);
-      gettimeofday(&cpu->clock_time, NULL); // reset clock time
-    }
-    cpu->delay_timer--;
-    if (cpu->delay_timer == 0)
-      cpu->delay_timer = 60;
+    // Swap buffers!
+    glutSwapBuffers();    
+
+    // Processed frame
+    c8->draw_flag = FALSE;
   }
-
-  // update sound timer
-  if (cpu->sound_timer > 0){
-    if (cpu->sound_timer == 1)
-      printf("BEEP!\n");
-    cpu->sound_timer--;
-    if (cpu->sound_timer == 0)
-      cpu->sound_timer = 60;
-  } 
 }
 
 
@@ -409,43 +576,36 @@ void loadGenericAddition(struct chip8 *cpu){
 }
 
 
-/*
- * converts ASCII to hex for use in reading program
- */
-unsigned int asciiToHex(unsigned int ascii){
-  if (ascii >= 48 && ascii <= 57) // 0-9
-    return ascii - 48;
-  else if (ascii >= 65 && ascii <= 70) // A-F
-    return ascii - 65;
-  else {
-    printf("ERROR: Not hex value %u\n", ascii);
-    exit(0);
-  }
-}
-
-
 int main(int argc, char *argv[]){
   struct chip8 cpu1;
   FILE *program;
   unsigned int hex1, hex2 = 0;
   uint8_t half_opcode;
   int start = 0x0200;
-  char opt;
+  int opt;
   int program_arg = 1;
+  int t_flag = 0;
+  long psize;
+  char *buffer;
+  size_t result;
 
   // process flags
   opterr = 0;
-  while ((opt = getopt(argc, argv, "dh")) != -1){
+  while ((opt = getopt(argc, argv, "dht")) != -1){
     program_arg++;
     switch (opt){
       case 'd': // debug
         debug_enabled = 1;
+        break;
+      case 't': // text file
+        t_flag = 1;
         break;
       case 'h': // help
         printf("USAGE: %s <program_name>\n", argv[0]);
         printf("OPTIONS: -dh\n");
         printf("\t-d: debug mode\n");
         printf("\t-h: help\n");
+        printf("\t-t: load text file\n");
         return 0;
       default:
         break;
@@ -459,67 +619,105 @@ int main(int argc, char *argv[]){
 
   coldBoot(&cpu1); // setup chip8
 
-  program = fopen(argv[program_arg], "r");
-  if (program == NULL){
-    fclose(program);
-    printf("ERROR: program failed to open\n");
-    return 0;
-  } else {
-    // load opcode 1-byte at a time
-    while (1){
-      // get first 4-bits
-      hex1 = fgetc(program);
-      while (hex1 == 10 || hex1 == 32) // ignore line feeds and spaces
+  if (t_flag){
+    program = fopen(argv[argc - 1], "r");
+    if (program == NULL){
+      fclose(program);
+      printf("ERROR: program failed to open [1]\n");
+      return 0;
+    } else {
+      // load opcode 1-byte at a time
+      while (1){
+        // get first 4-bits
         hex1 = fgetc(program);
-      if (hex1 == EOF) 
-        break;
+        if (hex1 == EOF) 
+          break;
+        while (asciiToHex(hex1) == 16) // ignore line feeds and spaces
+          hex1 = fgetc(program);
 
-      // get next 4-bits
-      hex2 = fgetc(program);
-      while (hex2 == 10 || hex2 == 32) // ignore line feeds and spaces
+        // get next 4-bits
         hex2 = fgetc(program);
-      if (hex2 == EOF) 
-        break;
+        if (hex2 == EOF) 
+          break;
+        while (asciiToHex(hex1) == 16) // ignore line feeds and spaces
+          hex2 = fgetc(program);
 
-      // ignore "0x"
-      if (hex1 == '0' && hex2 == 'x')
-        continue;
+        // assemble opcode
+        half_opcode = asciiToHex(hex1);
+        half_opcode <<= 4;
+        half_opcode += asciiToHex(hex2);
 
-      // assemble opcode
-      half_opcode = asciiToHex(hex1);
-      half_opcode <<= 4;
-      half_opcode += asciiToHex(hex2);
+        if (start >= 4096){ // check for end of memory
+          fclose(program);
+          printf("ERROR: Program too large for memory [1]\n");
+          return 0;
+        }
 
-      if (start >= 4096){ // check for end of memory
+        cpu1.memory[start] = half_opcode; // store 
+        start++;
+      }
+      fclose(program);
+    }
+  } else {
+    program = fopen(argv[argc - 1], "rb");
+    if (program == NULL){
+      fclose(program);
+      printf("ERROR: program failed to open [2]\n");
+      return 0;
+    } else {
+      // Check file size
+      fseek(program , 0 , SEEK_END);
+      psize = ftell(program);
+      rewind(program);
+  
+      // Allocate memory to contain the whole file
+      buffer = (char*)malloc(sizeof(char) * psize);
+      if (buffer == NULL){
+        printf("Buffer error\n");
         fclose(program);
-        printf("ERROR: Program too large for memory\n");
         return 0;
       }
-      cpu1.memory[start] = half_opcode; // store 
-      start++;
+
+      // Copy the file into the buffer
+      result = fread (buffer, 1, psize, program);
+      if (result != psize){
+        printf("Reading error\n"); 
+        return 0;
+      }
+
+      // Copy buffer to Chip8 memory
+      if((4096-512) > psize){
+        for(int i = 0; i < psize; ++i)
+          cpu1.memory[i + 512] = buffer[i];
+      } else {
+        printf("Error: Program too large for memory [2]\n");
+      }
+  
+      free(buffer);
     }
     fclose(program);
   }
-     
 
   gettimeofday(&cpu1.clock_time, NULL); // reset time after reading in program
 
-  while(1){
-    emulateCycle(&cpu1); // handle one opcode
+  glutInit(&argc, argv);     
+  glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA);
 
-    if (cpu1.draw_flag)
-      updateGraphics(&cpu1); // draw to screen if needed
+  glutInitWindowSize(display_width, display_height);
+  glutInitWindowPosition(320, 320);
+  glutCreateWindow("Chip8");
+  
+  glutDisplayFunc(display);
+  glutIdleFunc(display);
+  glutReshapeFunc(reshape_window);       
+  glutKeyboardFunc(keyboardDown);
+  glutKeyboardUpFunc(keyboardUp); 
 
-    //updateKeys(&cpu1);
-    updateTimers(&cpu1); // TODO: limit to 60 instructions per sec
+#ifdef DRAWWITHTEXTURE
+  setupTexture();     
+#endif  
 
-    if (debug_enabled){
-      printf("Opcode: %04X\n", cpu1.opcode);
-      dumpDebug(&cpu1);
-      printf("Press any key to continue");
-      getchar();
-    }
-  }
+  glutMainLoop(); 
 
   return 0;
 }

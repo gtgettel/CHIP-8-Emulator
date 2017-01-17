@@ -239,12 +239,19 @@ void reshape_window(GLsizei w, GLsizei h){
  * handles one instruction cycle
  */
 void emulateCycle(struct chip8 *cpu){
-  int key;
   int dont_increment = 0;
-  uint8_t temp_register, x, y, n, pixel;
+  bool key_press = FALSE;
+  uint8_t x, y, n, pixel;
   uint16_t opcode = (cpu->memory[cpu->program_counter] << 8 | 
     cpu->memory[cpu->program_counter + 1]); // fetch opcode
   cpu->opcode = opcode;
+
+  if (debug_enabled){
+    printf("Opcode: %04X\n", cpu->opcode);
+    dumpDebug(cpu);
+    printf("Press any key to continue");
+    getchar();
+  }
 
   switch (opcode & 0xF000){ // Decode opcode
     // Execute opcode
@@ -260,8 +267,8 @@ void emulateCycle(struct chip8 *cpu){
           cpu->draw_flag = TRUE;
           break;
         case 0x000E: // 0x00EE: returns from subroutine
-          cpu->program_counter = cpu->stack[cpu->stack_pointer];
           cpu->stack_pointer--;
+          cpu->program_counter = cpu->stack[cpu->stack_pointer];
           break;
         default:
           printf("Opcode not recognized: %04X\n", opcode);
@@ -288,8 +295,7 @@ void emulateCycle(struct chip8 *cpu){
         cpu->program_counter += 2;
       break;
     case 0x5000: // 5XY0: skips next instruction if VX == VY
-      if (cpu->registers[(opcode & 0x0F00) >> 8] == 
-          cpu->registers[(opcode & 0x00FF) >> 4])
+      if (cpu->registers[(opcode & 0x0F00) >> 8] == cpu->registers[(opcode & 0x00F0) >> 4])
         cpu->program_counter += 2;
       break;
     case 0x6000: // 6XNN: sets VX to NN
@@ -326,11 +332,11 @@ void emulateCycle(struct chip8 *cpu){
             cpu->registers[0xF] = 0;
           else
             cpu->registers[0xF] = 1;
-          cpu->registers[(opcode & 0x0F00) >> 8] += (-cpu->registers[(opcode & 0x00F0) >> 4]);
+          cpu->registers[(opcode & 0x0F00) >> 8] -= cpu->registers[(opcode & 0x00F0) >> 4];
           break;
         case 0x0006: // 8XY6: VX >> 1
                      // VF is set to the value of the least significant bit of VX before the shift
-          cpu->registers[0xF] = ((opcode & 0x0F00) >> 8) & (-((opcode & 0x0F00) >> 8));
+          cpu->registers[0xF] = ((opcode & 0x0F00) >> 8) & 0x1;
           cpu->registers[(opcode & 0x0F00) >> 8] >>= 1;
           break;
         case 0x0007: // 8XY7: Sets VX to VY minus VX
@@ -344,9 +350,7 @@ void emulateCycle(struct chip8 *cpu){
           break; 
         case 0x000E: // 8XYE: VX << 1
                      // VF is set to the value of the most significant bit of VX before the shift
-          temp_register = cpu->registers[(opcode & 0x0F00) >> 8];
-          while (temp_register >>= 1)
-            cpu->registers[0xF]++;
+          cpu->registers[0xF] = cpu->registers[(opcode & 0x0F00) >> 8] >> 7;
           cpu->registers[(opcode & 0x0F00) >> 8] <<= 1;
           break;
         default:
@@ -356,8 +360,7 @@ void emulateCycle(struct chip8 *cpu){
       }
       break;
     case 0x9000: // 9XY0: skips next instruction if VX != VY
-      if (cpu->registers[(opcode & 0x0F00) >> 8] != 
-          cpu->registers[(opcode & 0x00F0) >> 4])
+      if (cpu->registers[(opcode & 0x0F00) >> 8] != cpu->registers[(opcode & 0x00F0) >> 4])
         cpu->program_counter += 2;
       break;
     case 0xA000: // ANNN: sets I to the address NNN
@@ -368,7 +371,7 @@ void emulateCycle(struct chip8 *cpu){
       dont_increment = 1;
       break;
     case 0xC000: // CXNN: VX = rand() & NN
-      cpu->registers[(opcode & 0x0F00) >> 8] = rand() & (opcode & 0x00FF);
+      cpu->registers[(opcode & 0x0F00) >> 8] = (rand() % 0xFF) & (opcode & 0x00FF);
       break;
     case 0xD000: // DXYN: Draws a sprite at coordinate (VX, VY) that has a width of 8 pixels and a 
                  // height of N pixels. Each row of 8 pixels is read as bit-coded starting from memory 
@@ -394,11 +397,11 @@ void emulateCycle(struct chip8 *cpu){
     case 0xE000: // ENNN: 
       switch (opcode & 0x00FF){
         case 0x009E: // EX9E: skips the next instruction if the key stored in VX is pressed
-          if (cpu->key[cpu->registers[(opcode & 0x0F00) >> 8]])
+          if (cpu->key[cpu->registers[(opcode & 0x0F00) >> 8]] != 0)
             cpu->program_counter += 2;
           break;
         case 0x00A1: // EXA1: Skips the next instruction if the key stored in VX isn't pressed
-          if (!cpu->key[cpu->registers[(opcode & 0x0F00) >> 8]])
+          if (cpu->key[cpu->registers[(opcode & 0x0F00) >> 8]] == 0)
             cpu->program_counter += 2;
           break;
         default:
@@ -413,16 +416,13 @@ void emulateCycle(struct chip8 *cpu){
           cpu->registers[(opcode & 0x0F00) >> 8] = cpu->delay_timer;
           break;
         case 0x000A: // FX0A: Wait for key, then store in VX
-          // TODO:
-          while(1){
-            printf("waiting for key press (0-15)...");
-            key = getchar();
-            if (key <= 15 && key >= 0){
-              cpu->key[key] = 1;
-              cpu->registers[(opcode & 0x0F00) >> 8] = key;
-              printf("\n");
-              break;
+          for (int i = 0; i < 16; i++){
+            if (cpu->key[i] != 0){
+              cpu->registers[(opcode & 0x0F00) >> 8] = cpu->index;
+              key_press = TRUE;
             }
+            if (key_press == FALSE)
+              return;
           }
           break;
         case 0x0015: // FX15: sets delay timer to VX
@@ -432,13 +432,16 @@ void emulateCycle(struct chip8 *cpu){
           cpu->sound_timer = cpu->registers[(opcode & 0x0F00) >> 8];
           break;
         case 0x001E: // FX1E: adds VX to index register
+                     // VF is set to 1 when range overflow (I+VX>0xFFF), otherwise 0
+          if ((cpu->index + cpu->registers[(opcode & 0x0F00) >> 8]) > 0xFFF)
+            cpu->registers[0xF] = 1;
+          else
+            cpu->registers[0xF] = 0;
           cpu->index += cpu->registers[(opcode & 0x0F00) >> 8];
           break;
         case 0x0029: // FX29: sets index register to the location of the sprite for the character in 
                      // VX. Characters 0-F (in hexadecimal) are represented by a 4x5 font
-          for (int i = 0; i < cpu->registers[(opcode & 0x0F00) >> 8]; i++){
-            cpu->index += 0x5;
-          }
+          cpu->index = cpu->registers[(opcode & 0x0F00) >> 8] * 5;
           break;
         case 0x0033: // FX33: stores the binary-coded decimal representation of VX, with the most 
                      // significant of three digits at the address in index register, the middle digit 
@@ -449,7 +452,6 @@ void emulateCycle(struct chip8 *cpu){
           cpu->memory[cpu->index + 2] = (cpu->registers[(opcode & 0x0F00) >> 8] % 100) % 10;
           break;
         case 0x0055: // FX55: stores V0 to VX (including VX) in memory starting at address in index register
-          // TODO: does index get incremented
           for (int i = 0; i <= ((opcode & 0x0F00) >> 8); i++)
             cpu->memory[cpu->index + i] = cpu->registers[i];
           cpu->index += ((opcode & 0x0F00) >> 8) + 1;
@@ -472,16 +474,19 @@ void emulateCycle(struct chip8 *cpu){
       exit(0);
   }
 
-  if (debug_enabled){
-    printf("Opcode: %04X\n", cpu->opcode);
-    dumpDebug(cpu);
-    printf("Press any key to continue");
-    getchar();
-  }
-
   if (!dont_increment)
     cpu->program_counter += 2;
-  updateTimers(cpu);
+  
+  //updateTimers(cpu);
+  if(cpu->delay_timer > 0)
+    cpu->delay_timer--;
+
+  if(cpu->sound_timer > 0)
+  {
+    if(cpu->sound_timer == 1)
+      printf("BEEP!\n");
+    cpu->sound_timer--;
+  }
 }
 
 

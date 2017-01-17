@@ -12,7 +12,7 @@
 #define SCREEN_WIDTH 64
 #define SCREEN_HEIGHT 32
 #define DRAWWITHTEXTURE
-#define MODIFIER 5
+#define MODIFIER 10
 
 int debug_enabled = 0; // debug mode flag
 int display_width = SCREEN_WIDTH * MODIFIER;
@@ -476,7 +476,7 @@ void emulateCycle(struct chip8 *cpu){
 
   if (!dont_increment)
     cpu->program_counter += 2;
-  
+
   //updateTimers(cpu);
   if(cpu->delay_timer > 0)
     cpu->delay_timer--;
